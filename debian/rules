@@ -1,0 +1,39 @@
+#!/usr/bin/make -f
+
+build:
+
+build-arch:
+
+build-indep:
+
+clean:
+	dh_testdir
+	dh_testroot
+	dh_clean
+
+install:
+	dh_install src/rocket-menu /usr/bin
+	dh_install src/rocket-menu-indicator.desktop /etc/xdg/autostart
+	dh_install src/rocket-menu.desktop /usr/share/applications
+	dh_install src/rocket-menu.svg /usr/share/pixmaps
+	dh_install src/rocket-menu-about.svg /usr/share/pixmaps
+	dh_install src/rocket-menu-indicator.svg /usr/share/pixmaps
+	dh_testdir
+	dh_testroot
+
+binary-arch:
+
+binary-indep: install
+	dh_testdir
+	dh_testroot
+	dh_installchangelogs
+	dh_installdocs
+	dh_fixperms
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-indep binary-arch
+
+.PHONY: clean install binary-arch binary-indep binary

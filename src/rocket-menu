@@ -1,0 +1,654 @@
+#!/usr/bin/env python
+
+import os
+import json
+import signal
+import gi
+from subprocess import call
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk
+gi.require_version('AppIndicator3', '0.1')
+from gi.repository import AppIndicator3 as appindicator
+from gi.repository import Pango
+gi.require_version('Notify', '0.7')
+from gi.repository import Notify
+
+APPID = 'rocket-menu'
+config_dir = os.path.expanduser('~/.config/rocket-menu')
+settings_file = config_dir + '/settings.json'
+connections_file = config_dir + '/connections.json'
+icon_path = '/usr/share/pixmaps'
+indicator_icon = icon_path + '/rocket-menu-indicator.svg'
+rocket_menu_icon = icon_path + '/rocket-menu.svg'
+rocket_menu_about_icon = icon_path + '/rocket-menu-about.svg'
+menu = Gtk.Menu()
+
+
+class qcm_indicator():
+    def main(self):
+        settings = qcm_settings()
+        settings.setup()
+
+        conns = qcm_connections()
+        conns.setup()
+
+        indicator = appindicator.Indicator.new(APPID, os.path.abspath(indicator_icon), appindicator.IndicatorCategory.SYSTEM_SERVICES)
+        indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
+
+        indicator.set_menu(self.build_menu(self))
+        Notify.init(APPID)
+        Gtk.main()
+
+    def build_menu(self, widget):
+        # Remove existing menu items
+        for menu_item in menu.get_children():
+            menu.remove(menu_item)
+
+        conns = qcm_connections()
+        connections = conns.get_connections()
+
+        # Add a menu item for each connection
+        for connection in connections['connections']:
+            # Test for expanduser function
+            if connection['address'][:1] == '~':
+                connection['address'] = os.path.expanduser(connection['address'])
+
+            # Test for horizontal rule
+            if connection['label'][:3] == '---':
+                menu.append(Gtk.SeparatorMenuItem())
+
+            # Test for file
+            elif os.path.isfile(connection['address']):
+                menu_item = Gtk.MenuItem(connection['label'])
+                menu_item.connect('activate', self.open_file, connection['address'])
+                menu.append(menu_item)
+
+            # Test for directory
+            elif os.path.isdir(connection['address']):
+                menu_item = Gtk.MenuItem(connection['label'])
+                menu_item.connect('activate', self.open_folder, connection['address'])
+                menu.append(menu_item)
+
+            # Test for network connection
+            elif (
+                  connection['address'][:6] == 'ssh://' or
+                  connection['address'][:7] == 'sftp://' or
+                  connection['address'][:6] == 'ftp://' or
+                  connection['address'][:6] == 'smb://'):
+                    menu_item = Gtk.MenuItem(connection['label'])
+                    menu_item.connect('activate', self.connect_to, connection['label'], connection['address'])
+                    menu.append(menu_item)
+
+            # Test for web addresses
+            elif (
+                  connection['address'][:7] == 'http://' or
+                  connection['address'][:8] == 'https://'):
+                    menu_item = Gtk.MenuItem(connection['label'])
+                    menu_item.connect('activate', self.open_url, connection['address'])
+                    menu.append(menu_item)
+
+            else:
+                menu_item = Gtk.MenuItem(connection['label'])
+                menu_item.connect('activate', self.connect_error_dialog)
+                menu.append(menu_item)
+
+        # Add a seperator
+        menu.append(Gtk.SeparatorMenuItem())
+
+        # Edit connections menu item
+        self.menu_item_edit_connections = Gtk.MenuItem('Edit Connections...')
+        self.menu_item_edit_connections.connect('activate', self.edit_connections)
+        menu.append(self.menu_item_edit_connections)
+
+        # Edit settings menu item
+        self.menu_item_edit_settings = Gtk.MenuItem('Settings...')
+        self.menu_item_edit_settings.connect('activate', self.edit_settings)
+        menu.append(self.menu_item_edit_settings)
+
+        # About menu item
+        self.menu_item_about = Gtk.MenuItem('About')
+        self.menu_item_about.connect('activate', self.about)
+        menu.append(self.menu_item_about)
+
+        # Quit this sucker
+        menu_item = Gtk.MenuItem('Quit')
+        menu_item.connect('activate', self.quit)
+        menu.append(menu_item)
+
+        menu.show_all()
+        return menu
+
+    # Connect to address with nauilus
+    def connect_to(self, widget, label ,address):
+        call(['nautilus', address])
+        Notify.Notification.new("<b>Rocket Menu</b>", 'Attempting to connect to '+label+'...', indicator_icon).show()
+
+    def open_file(self, widget, address):
+        call(['gvfs-open', address])
+
+    def open_folder(self, widget, address):
+        call(['gvfs-open', address])
+
+    def open_url(self, widget, address):
+        call(['gvfs-open', address])
+
+    def connect_error_dialog(self, widget):
+        error = qcm_connect_error_dialog()
+        error.show_mesg()
+
+    def edit_connections(self, widget):
+        editor = qcm_connections_editor()
+        editor.connect("delete-event", self.edit_connections_close)
+        editor.show_all()
+        self.menu_item_edit_connections.set_sensitive(False)
+        editor.set_keep_above(True)
+        editor.set_keep_above(False)
+
+    def edit_settings(self, widget):
+        settings = qcm_settings_editor()
+        settings.connect("delete-event", self.edit_settings_close)
+        settings.show_all()
+        self.menu_item_edit_settings.set_sensitive(False)
+        settings.set_keep_above(True)
+        settings.set_keep_above(False)
+
+    def about(self, widget):
+        about = qcm_about_dialog()
+        about.connect("delete-event", self.about_close)
+        about.show_all()
+        self.menu_item_about.set_sensitive(False)
+        about.set_keep_above(True)
+        about.set_keep_above(False)
+
+    def about_close(self, widget, path):
+        self.menu_item_about.set_sensitive(True)
+
+    def edit_connections_close(self, widget, path):
+        self.menu_item_edit_connections.set_sensitive(True)
+
+    def edit_settings_close(self, widget, path):
+        self.menu_item_edit_settings.set_sensitive(True)
+
+    def quit(self, widget):
+        Notify.uninit()
+        Gtk.main_quit()
+
+
+class qcm_settings():
+    def setup(self):
+        # Test config directory exists
+        if not os.path.isdir(config_dir):
+            os.mkdir(config_dir)
+            f = open(settings_file, 'w')
+            f.write('{"connections_file": "'+config_dir+'/connections.json"}')
+            f.close()
+
+    def get_connections_file(self):
+        f = open(settings_file, 'r')
+        settings = f.read()
+        f.close()
+        settings = json.loads(settings)
+        return settings["connections_file"]
+
+    def set_connections_file(self, path):
+        new_connections_file = path + '/connections.json'
+        if not os.path.isfile(new_connections_file):
+            connections_file = self.get_connections_file()
+
+            f = open(connections_file, 'r')
+            connections = f.read()
+            f.close()
+
+            f = open(new_connections_file, 'w')
+            f.write(connections)
+            f.close()
+
+        f = open(settings_file, 'w')
+        f.write('{"connections_file": "'+path+'/connections.json"}')
+        f.close()
+
+        indicator = qcm_indicator()
+        indicator.build_menu(self)
+
+
+class qcm_connections():
+    def setup(self):
+        # Test config directory exists
+        if not os.path.isdir(config_dir):
+            os.mkdir(config_dir)
+
+        # Test config file exists
+        if not os.path.isfile(connections_file):
+            connections = []
+            connections.append({ 'label': 'Home', 'address': '~/'})
+            connections.append({ 'label': '---', 'address': 'seperator'})
+            connections.append({ 'label': 'Ubuntu anonymous FTP', 'address': 'ftp://ftp.ubuntu.com/ubuntu/dists/'})
+            connections.append({ 'label': 'GNU anonymous FTP', 'address': 'ftp://ftp.gnu.org/'})
+            connections.append({ 'label': '---', 'address': 'seperator'})
+            connections.append({ 'label': 'More info', 'address': 'https://corenominal.org/projects/rocket-menu/'})
+            connections = json.dumps({ 'connections': connections})
+            f = open(connections_file, 'w')
+            f.write(connections)
+            f.close()
+
+    def get_connections(self):
+        settings = qcm_settings()
+        connections_file_test = settings.get_connections_file()
+
+        if not os.path.isfile(connections_file_test):
+            connections_file_test = connections_file
+
+        f = open(connections_file_test, 'r')
+        connections = f.read()
+        f.close()
+        connections = json.loads(connections)
+        return connections
+
+    def save_connections(self, connections):
+        settings = qcm_settings()
+        connections_file_test = settings.get_connections_file()
+
+        if not os.path.isfile(connections_file_test):
+            connections_file_test = connections_file
+
+        f = open(connections_file_test, 'w')
+        f.write(connections)
+        f.close()
+
+class qcm_connect_error_dialog(Gtk.Window):
+
+    def show_mesg(self):
+        messagedialog = Gtk.MessageDialog(parent=self,
+                                          flags=Gtk.DialogFlags.MODAL,
+                                          type=Gtk.MessageType.WARNING,
+                                          buttons=Gtk.ButtonsType.OK,
+                                          message_format="Invalid address. Check address in connections editor.")
+        messagedialog.connect("response", self.dialog_response)
+        messagedialog.show()
+        messagedialog.set_keep_above(True)
+        messagedialog.set_keep_above(False)
+
+    def dialog_response(self, widget, response_id):
+        widget.destroy()
+
+
+class qcm_settings_editor(Gtk.Window):
+
+    def __init__(self):
+        Gtk.Window.__init__(self, title="Rocket Menu Settings")
+
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_border_width(0)
+        self.set_icon_from_file(rocket_menu_icon)
+        self.set_default_size(600, 100)
+        self.connect("delete-event", self.close_window)
+
+        vbox1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.add(vbox1)
+
+        # Set-up toolbar
+        self.toolbar = Gtk.Toolbar.new()
+        self.toolbar.get_style_context().add_class(Gtk.STYLE_CLASS_PRIMARY_TOOLBAR)
+        self.toolbar.set_hexpand(True)
+        self.toolbar.show()
+        vbox1.pack_start(self.toolbar, False, False, 0)
+
+        # Apply button
+        self.button_apply = Gtk.ToolButton.new_from_stock(Gtk.STOCK_APPLY)
+        self.button_apply.set_is_important(True)
+        self.toolbar.insert(self.button_apply, 0)
+        self.button_apply.set_sensitive(False)
+        self.button_apply.show()
+        self.button_apply.connect("clicked", self.save_settings)
+
+        vbox2 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        vbox2.set_border_width(20)
+        vbox1.pack_start(vbox2, True, True, 0)
+
+        self.label = Gtk.Label(xalign=0)
+        self.label.set_markup('Save connections file in:')
+        vbox2.pack_start(self.label, False, False, 0)
+
+        self.folder_path = Gtk.Entry()
+        settings = qcm_settings()
+        path = settings.get_connections_file()
+        path = path[:-17]
+        self.folder_path.set_text(path)
+        self.folder_path.set_editable(False)
+        self.folder_path.set_sensitive(False)
+        vbox2.pack_start(self.folder_path, False, False, 0)
+
+        button_choose_folder = Gtk.Button("Select Folder")
+        button_choose_folder.connect("clicked", self.on_folder_clicked)
+        vbox2.pack_start(button_choose_folder, False, False, 0)
+
+    def on_folder_clicked(self, widget):
+        dialog = Gtk.FileChooserDialog("Please choose a folder", self,
+            Gtk.FileChooserAction.SELECT_FOLDER,
+            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+             "Select", Gtk.ResponseType.OK))
+        dialog.set_default_size(600, 400)
+        settings = qcm_settings()
+        path = settings.get_connections_file()
+        path = path[:-17]
+        dialog.set_current_folder(path)
+
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            if os.access(dialog.get_filename(), os.W_OK):
+                self.folder_path.set_text(dialog.get_filename())
+                self.button_apply.set_sensitive(True)
+            else:
+                self.invalid_selection_dialog()
+
+        dialog.destroy()
+
+    def invalid_selection_dialog(self):
+        messagedialog = Gtk.MessageDialog(parent=self,
+                                          flags=Gtk.DialogFlags.MODAL,
+                                          type=Gtk.MessageType.WARNING,
+                                          buttons=Gtk.ButtonsType.OK,
+                                          message_format="Invalid folder, must be writable.")
+        messagedialog.connect("response", self.dialog_response)
+        messagedialog.show()
+
+    def dialog_response(self, widget, response_id):
+        widget.destroy()
+
+    def close_window(self, widget, foo):
+        changes = self.button_apply.get_sensitive()
+
+        if changes:
+            Dialog = Gtk.MessageDialog(parent=self,
+                                       flags=Gtk.DialogFlags.MODAL,
+                                       type=Gtk.MessageType.WARNING,
+                                       buttons=Gtk.ButtonsType.YES_NO,
+                                       message_format="You have unsaved changes.\nDo you want to save changes?")
+            response = Dialog.run()
+            if response == Gtk.ResponseType.YES:
+                self.save_settings(self)
+                Dialog.destroy()
+            else:
+                Dialog.destroy()
+
+    def save_settings(self, widget):
+        self.button_apply.set_sensitive(False)
+        path = self.folder_path.get_text()
+        settings = qcm_settings()
+        settings.set_connections_file(path)
+
+
+class qcm_about_dialog(Gtk.Window):
+
+    def __init__(self):
+        Gtk.Window.__init__(self, title="About Rocket Menu")
+
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_border_width(20)
+        self.set_icon_from_file(rocket_menu_icon)
+        self.props.resizable = False
+        self.set_default_size(500, 200)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        self.add(vbox)
+
+        self.image = Gtk.Image.new_from_file(rocket_menu_about_icon)
+        vbox.pack_start(self.image, True, True, 0)
+
+        self.label = Gtk.Label()
+        self.label.set_markup('<big><b>Rocket Menu</b></big>')
+        vbox.pack_start(self.label, True, True, 0)
+
+        self.label = Gtk.Label("Provides an Application Indicator menu for "
+                               "opening files and directories,\n and making "
+                               "connections to remote servers via Nautilus. ")
+        self.label.set_line_wrap(True)
+        vbox.pack_start(self.label, True, True, 0)
+
+        self.button = Gtk.LinkButton("https://github.com/corenominal/rocket-menu", "Visit GitHub Page")
+        vbox.pack_start(self.button, False, False, 0)
+
+        self.button = Gtk.LinkButton("https://corenominal.org/projects/rocket-menu/", "Visit Project Homepage")
+        vbox.pack_start(self.button, False, False, 0)
+
+
+class qcm_connections_editor(Gtk.Window):
+
+    def __init__(self):
+        Gtk.Window.__init__(self, title="Rocket Menu: Connections Editor")
+
+        self.set_default_size(600, 500)
+        self.set_border_width(0)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_icon_from_file(rocket_menu_icon)
+
+        self.connect("delete-event", self.close_window)
+
+        # Begin layout
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add(vbox)
+
+        # Set-up toolbar
+        self.toolbar = Gtk.Toolbar.new()
+        self.toolbar.get_style_context().add_class(Gtk.STYLE_CLASS_PRIMARY_TOOLBAR)
+        self.toolbar.set_hexpand(True)
+        self.toolbar.show()
+        vbox.pack_start(self.toolbar, False, False, 0)
+
+        # Apply button
+        self.button_apply = Gtk.ToolButton.new_from_stock(Gtk.STOCK_APPLY)
+        self.button_apply.set_is_important(True)
+        self.toolbar.insert(self.button_apply, 0)
+        self.button_apply.set_sensitive(False)
+        self.button_apply.show()
+        self.button_apply.connect("clicked", self.save_liststore)
+
+        # Move down button
+        self.button_down = Gtk.ToolButton.new_from_stock(Gtk.STOCK_GO_DOWN)
+        self.button_down.set_is_important(True)
+        self.toolbar.insert(self.button_down, 0)
+        self.button_down.show()
+        self.button_down.connect("clicked", self.move_item_down)
+
+        # Move up button
+        self.button_up = Gtk.ToolButton.new_from_stock(Gtk.STOCK_GO_UP)
+        self.button_up.set_is_important(True)
+        self.toolbar.insert(self.button_up, 0)
+        self.button_up.show()
+        self.button_up.connect("clicked", self.move_item_up)
+
+        # Remove button
+        self.button_remove = Gtk.ToolButton.new_from_stock(Gtk.STOCK_REMOVE)
+        self.button_remove.set_is_important(True)
+        self.toolbar.insert(self.button_remove, 0)
+        self.button_remove.show()
+        self.button_remove.connect("clicked", self.remove_item)
+
+        # New button
+        self.button_new = Gtk.ToolButton.new_from_stock(Gtk.STOCK_NEW)
+        self.button_new.set_is_important(True)
+        self.toolbar.insert(self.button_new, 0)
+        self.button_new.show()
+        self.button_new.connect("clicked", self.new_item)
+
+        # Set-up the treeview
+        self.treeview = Gtk.TreeView(model=self.build_liststore())
+        self.treeview.props.enable_grid_lines = False
+        self.treeview.props.enable_search = False
+
+        self.renderer_name = Gtk.CellRendererText()
+        self.renderer_name.set_property("editable", True)
+        self.renderer_name.props.weight_set = True
+        self.renderer_name.props.weight = Pango.Weight.BOLD
+        self.column_name = Gtk.TreeViewColumn("Name", self.renderer_name, text=0)
+        self.column_name.set_resizable(True)
+        # self.column_name.set_sort_column_id(0)
+        self.treeview.append_column(self.column_name)
+        self.renderer_name.connect("edited", self.name_edited)
+
+        self.renderer_address = Gtk.CellRendererText()
+        self.renderer_address.set_property("editable", True)
+        self.column_address = Gtk.TreeViewColumn("Address", self.renderer_address, text=1)
+        self.column_address.set_resizable(True)
+        self.treeview.append_column(self.column_address)
+        self.renderer_address.connect("edited", self.address_edited)
+
+        select = self.treeview.get_selection()
+        select.connect("changed", self.on_treeview_selection_changed)
+
+        # Set-up scrolled window for treeview
+        scrolled_window = Gtk.ScrolledWindow()
+        scrolled_window.add_with_viewport(self.treeview)
+
+        vbox.pack_start(scrolled_window, True, True, 0)
+        vbox.set_focus_chain([self.treeview])
+
+        # Set-up control buttons
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        vbox.pack_end(hbox, False, False, 0)
+
+        if len(self.liststore) == 0:
+            self.button_remove.set_sensitive(False)
+
+    def on_treeview_selection_changed(self, selection):
+        model, treeiter = selection.get_selected()
+        path = model.get_path(treeiter)
+
+        if path[0] == 0:
+            self.button_up.set_sensitive(False)
+        else:
+            self.button_up.set_sensitive(True)
+
+        i = len(self.liststore) - 1
+
+        if path[0] == i:
+            self.button_down.set_sensitive(False)
+        else:
+            self.button_down.set_sensitive(True)
+
+    def close_window(self, widget, foo):
+        changes = self.button_apply.get_sensitive()
+
+        if changes:
+            Dialog = Gtk.MessageDialog(parent=self,
+                                       flags=Gtk.DialogFlags.MODAL,
+                                       type=Gtk.MessageType.WARNING,
+                                       buttons=Gtk.ButtonsType.YES_NO,
+                                       message_format="You have unsaved changes.\nDo you want to save changes?")
+            response = Dialog.run()
+            if response == Gtk.ResponseType.YES:
+                self.save_liststore(self)
+                Dialog.destroy()
+            else:
+                Dialog.destroy()
+
+
+    def new_item(self, widget):
+        iter = self.liststore.append(['name', 'ssh://server.address'])
+        path = self.liststore.get_string_from_iter(iter)
+        col = self.column_name
+        self.treeview.set_cursor(path, col, True)
+
+    def remove_item(self, widget):
+        selection = self.treeview.get_selection()
+        (model, iter) = selection.get_selected()
+        self.liststore.remove(iter)
+        if len(self.liststore) == 0:
+            self.button_remove.set_sensitive(False)
+
+        self.button_apply.set_sensitive(True)
+
+    def move_item_up(self, widget):
+        selection = self.treeview.get_selection()
+        selections, model = selection.get_selected_rows()
+
+        for row in selections:
+            if selection.iter_is_selected(row.iter) and row.previous != None:
+                self.liststore.move_before(row.iter, row.previous.iter)
+
+        selection = self.treeview.get_selection()
+        self.on_treeview_selection_changed(selection)
+
+        self.button_apply.set_sensitive(True)
+
+    def move_item_down(self, widget):
+        selection = self.treeview.get_selection()
+        selections, model = selection.get_selected_rows()
+
+        for i in range(len(selections)-1, -1, -1):
+            row = selections[i]
+            if selection.iter_is_selected(row.iter) and row.next != None:
+                self.liststore.move_after(row.iter, row.next.iter)
+
+        selection = self.treeview.get_selection()
+        self.on_treeview_selection_changed(selection)
+
+        self.button_apply.set_sensitive(True)
+
+    def build_liststore(self):
+        self.liststore = Gtk.ListStore(str, str)
+        conns = qcm_connections()
+        connections = conns.get_connections()
+        for connection in connections['connections']:
+            self.liststore.append([connection['label'], connection['address']])
+
+        self.liststore.set_sort_func(0, self.liststore_sort, None)
+
+        return self.liststore
+
+    def liststore_sort(self, model, row1, row2, user_data):
+        self.button_apply.set_sensitive(True)
+        sort_column, _ = model.get_sort_column_id()
+        value1 = model.get_value(row1, sort_column).lower()
+        value2 = model.get_value(row2, sort_column).lower()
+        if value1 < value2:
+            return -1
+        elif value1 == value2:
+            return 0
+        else:
+            return 1
+
+    def name_edited(self, widget, path, text):
+        if text.strip() == '':
+            text = 'name'
+
+        self.liststore[path][0] = text
+
+        if text[:3] == '---':
+            self.liststore[path][1] = 'seperator'
+
+        self.button_remove.set_sensitive(True)
+        self.button_apply.set_sensitive(True)
+        # col = self.column_address
+        # self.treeview.set_cursor(path, col, True)
+
+    def address_edited(self, widget, path, text):
+        if text.strip() == '':
+            text = 'ssh://server.address'
+
+        self.liststore[path][1] = text
+        self.button_apply.set_sensitive(True)
+
+    def save_liststore(self, widget):
+        connections = []
+        i = 0
+        while i < len(self.liststore):
+            c = {'label': self.liststore[i][0], 'address': self.liststore[i][1]}
+            connections.append(c)
+            i = i + 1
+
+        connections = {'connections': connections}
+        connections = json.dumps(connections)
+        conns = qcm_connections()
+        conns.save_connections(connections)
+        self.button_apply.set_sensitive(False)
+
+        # Rebuild the indicator menu
+        indicator = qcm_indicator()
+        indicator.build_menu(self)
+
+
+app = qcm_indicator()
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+app.main()

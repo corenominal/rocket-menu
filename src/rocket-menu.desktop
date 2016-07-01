@@ -1,0 +1,10 @@
+[Desktop Entry]
+Icon=rocket-menu
+Type=Application
+Name=Rocket Menu
+Comment=An application indicator menu for opening files, folders, network locations and web addresses.
+Exec=/usr/bin/rocket-menu
+OnlyShowIn=Unity;
+StartupNotify=false
+Terminal=false
+
