@@ -8,7 +8,7 @@ Homepage: https://corenominal.org/projects/rocket-menu/
 
 Package: rocket-menu
 Architecture: all
-Depends: ${shlibs:Depends}, ${misc:Depends}, python, gir1.2-appindicator3-0.1, python3-gi, ubuntu-desktop
+Depends: ${shlibs:Depends}, ${misc:Depends}, python, gir1.2-appindicator3-0.1, python-gi, ubuntu-desktop, unity
 Description: Quick launch panel menu for Ubuntu Unity.
  An application indicator menu for quick access to files, 
  folders, web addresses and remote file servers.

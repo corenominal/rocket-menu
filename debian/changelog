@@ -1,3 +1,10 @@
+rocket-menu (20160704) xenial; urgency=low
+
+  * Add python-gi to dependencies.
+  * Add unity to dependencies.
+
+ -- Philip Newborough <corenominal@corenominal.org>  Mon, 4 Jul 2016 21:28:46 +0100
+
 rocket-menu (20160630) xenial; urgency=low
 
   * Initial release.
