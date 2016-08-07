@@ -92,7 +92,7 @@ class qcm_indicator():
                 menu_item.connect('activate', self.connect_error_dialog)
                 menu.append(menu_item)
 
-        # Add a seperator
+        # Add a separator
         menu.append(Gtk.SeparatorMenuItem())
 
         # Edit connections menu item
@@ -221,10 +221,10 @@ class qcm_connections():
         if not os.path.isfile(connections_file):
             connections = []
             connections.append({ 'label': 'Home', 'address': '~/'})
-            connections.append({ 'label': '---', 'address': 'seperator'})
+            connections.append({ 'label': '---', 'address': 'separator'})
             connections.append({ 'label': 'Ubuntu anonymous FTP', 'address': 'ftp://ftp.ubuntu.com/ubuntu/dists/'})
             connections.append({ 'label': 'GNU anonymous FTP', 'address': 'ftp://ftp.gnu.org/'})
-            connections.append({ 'label': '---', 'address': 'seperator'})
+            connections.append({ 'label': '---', 'address': 'separator'})
             connections.append({ 'label': 'More info', 'address': 'https://corenominal.org/projects/rocket-menu/'})
             connections = json.dumps({ 'connections': connections})
             f = open(connections_file, 'w')
@@ -417,7 +417,7 @@ class qcm_connections_editor(Gtk.Window):
     def __init__(self):
         Gtk.Window.__init__(self, title="Rocket Menu: Connections Editor")
 
-        self.set_default_size(600, 500)
+        self.set_default_size(700, 500)
         self.set_border_width(0)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_icon_from_file(rocket_menu_icon)
@@ -463,6 +463,22 @@ class qcm_connections_editor(Gtk.Window):
         self.toolbar.insert(self.button_remove, 0)
         self.button_remove.show()
         self.button_remove.connect("clicked", self.remove_item)
+
+        # Duplicate button
+        self.button_duplicate = Gtk.ToolButton.new(None, "Duplicate")
+        self.button_duplicate.set_stock_id(Gtk.STOCK_COPY)
+        self.button_duplicate.set_is_important(True)
+        self.toolbar.insert(self.button_duplicate, 0)
+        self.button_duplicate.show()
+        self.button_duplicate.connect("clicked", self.duplicate_item)
+
+        # New separator button
+        self.button_separator = Gtk.ToolButton.new(None, "Separator")
+        self.button_separator.set_stock_id(Gtk.STOCK_NEW)
+        self.button_separator.set_is_important(True)
+        self.toolbar.insert(self.button_separator, 0)
+        self.button_separator.show()
+        self.button_separator.connect("clicked", self.new_separator_item)
 
         # New button
         self.button_new = Gtk.ToolButton.new_from_stock(Gtk.STOCK_NEW)
@@ -513,6 +529,15 @@ class qcm_connections_editor(Gtk.Window):
 
     def on_treeview_selection_changed(self, selection):
         model, treeiter = selection.get_selected()
+
+        if treeiter is None:
+            self.button_remove.set_sensitive(False)
+            self.button_duplicate.set_sensitive(False)
+            return
+        
+        self.button_remove.set_sensitive(True)
+        self.button_duplicate.set_sensitive(True)
+
         path = model.get_path(treeiter)
 
         if path[0] == 0:
@@ -550,12 +575,31 @@ class qcm_connections_editor(Gtk.Window):
         col = self.column_name
         self.treeview.set_cursor(path, col, True)
 
+    def new_separator_item(self, widget):
+        selection = self.treeview.get_selection()
+        (model, iter) = selection.get_selected()
+
+        iter = self.liststore.insert_after(iter, ["---", "separator"])
+        path = self.liststore.get_string_from_iter(iter)
+        self.treeview.set_cursor(path)
+        self.button_apply.set_sensitive(True)
+
+    def duplicate_item(self, widget):
+        selection = self.treeview.get_selection()
+        (model, iter) = selection.get_selected()
+
+        name = model.get_value(iter, 0)
+        address = model.get_value(iter, 1)
+
+        iter = self.liststore.insert_after(iter, [name, address])
+        path = self.liststore.get_string_from_iter(iter)
+        self.treeview.set_cursor(path)
+        self.button_apply.set_sensitive(True)
+
     def remove_item(self, widget):
         selection = self.treeview.get_selection()
         (model, iter) = selection.get_selected()
         self.liststore.remove(iter)
-        if len(self.liststore) == 0:
-            self.button_remove.set_sensitive(False)
 
         self.button_apply.set_sensitive(True)
 
@@ -616,10 +660,9 @@ class qcm_connections_editor(Gtk.Window):
         self.liststore[path][0] = text
 
         if text[:3] == '---':
-            self.liststore[path][1] = 'seperator'
+            self.liststore[path][1] = 'separator'
 
         self.button_remove.set_sensitive(True)
-        self.button_apply.set_sensitive(True)
         # col = self.column_address
         # self.treeview.set_cursor(path, col, True)
 
