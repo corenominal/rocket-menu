@@ -1,3 +1,10 @@
+rocket-menu (20160807) xenial; urgency=low
+
+  * Improve connections editor (thanks, Mourad Hamoud!)
+  * Add missing dependencies.
+
+ -- Philip Newborough <corenominal@corenominal.org>  Sun, 7 Aug 2016 16:45:55 +0100
+
 rocket-menu (20160704) xenial; urgency=low
 
   * Add python-gi to dependencies.
