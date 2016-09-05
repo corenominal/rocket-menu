@@ -5,7 +5,6 @@ import json
 import signal
 import gi
 from subprocess import call
-from webob import exc
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
@@ -233,14 +232,18 @@ class qcm_settings():
     def _get_default_settings(self):
         return {
             'connections_file': config_dir + '/connections.json',
-            'terminal': 'gnome-terminal -e \'%s\''
+            'terminal': "gnome-terminal -e '%s'"
         }
 
     def _load(self):
         f = open(settings_file, 'r')
-        settings = f.read()
-        f.close()
-        return json.loads(settings)
+        try:
+            settings = json.loads(f.read())
+            # Override default settings
+            settings = dict(self._get_default_settings().items() + settings.items())
+            return settings;
+        finally:
+            f.close()
 
     def _save(self, settings):
         f = open(settings_file, 'w')
