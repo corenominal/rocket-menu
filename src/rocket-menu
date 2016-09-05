@@ -5,6 +5,7 @@ import json
 import signal
 import gi
 from subprocess import call
+
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 gi.require_version('AppIndicator3', '0.1')
@@ -87,6 +88,12 @@ class qcm_indicator():
                     menu_item.connect('activate', self.open_url, connection['address'])
                     menu.append(menu_item)
 
+            # Run in terminal
+            elif (connection['address'][:6] == 'cmd://'):
+                menu_item = Gtk.MenuItem(connection['label'])
+                menu_item.connect('activate', self.open_in_terminal, connection['address'])
+                menu.append(menu_item)
+
             else:
                 menu_item = Gtk.MenuItem(connection['label'])
                 menu_item.connect('activate', self.connect_error_dialog)
@@ -131,6 +138,14 @@ class qcm_indicator():
 
     def open_url(self, widget, address):
         call(['gvfs-open', address])
+
+    def open_in_terminal(self, widget, command):
+        settings = qcm_settings()
+        try:
+            cmd = settings.get_terminal() % command[6:]
+            os.system(cmd)
+        except TypeError:
+            pass
 
     def connect_error_dialog(self, widget):
         error = qcm_connect_error_dialog()
@@ -180,15 +195,14 @@ class qcm_settings():
         if not os.path.isdir(config_dir):
             os.mkdir(config_dir)
             f = open(settings_file, 'w')
-            f.write('{"connections_file": "'+config_dir+'/connections.json"}')
+            f.write(json.dumps(self._get_default_settings()))
             f.close()
 
     def get_connections_file(self):
-        f = open(settings_file, 'r')
-        settings = f.read()
-        f.close()
-        settings = json.loads(settings)
-        return settings["connections_file"]
+        return self._load()["connections_file"]
+
+    def get_terminal(self):
+        return self._load()["terminal"]
 
     def set_connections_file(self, path):
         new_connections_file = path + '/connections.json'
@@ -203,13 +217,38 @@ class qcm_settings():
             f.write(connections)
             f.close()
 
-        f = open(settings_file, 'w')
-        f.write('{"connections_file": "'+path+'/connections.json"}')
-        f.close()
+        settings = self._load()
+        settings['connections_file'] = os.path.realpath(new_connections_file);
+        self._save(settings)
 
         indicator = qcm_indicator()
         indicator.build_menu(self)
 
+    def set_terminal(self, terminal):
+        settings = self._load()
+        settings['terminal'] = terminal
+        self._save(settings)
+
+    def _get_default_settings(self):
+        return {
+            'connections_file': config_dir + '/connections.json',
+            'terminal': "gnome-terminal -e '%s'"
+        }
+
+    def _load(self):
+        f = open(settings_file, 'r')
+        try:
+            settings = json.loads(f.read())
+            # Override default settings
+            settings = dict(self._get_default_settings().items() + settings.items())
+            return settings;
+        finally:
+            f.close()
+
+    def _save(self, settings):
+        f = open(settings_file, 'w')
+        f.write(json.dumps(settings))
+        f.close()
 
 class qcm_connections():
     def setup(self):
@@ -296,8 +335,8 @@ class qcm_settings_editor(Gtk.Window):
         # Apply button
         self.button_apply = Gtk.ToolButton.new_from_stock(Gtk.STOCK_APPLY)
         self.button_apply.set_is_important(True)
-        self.toolbar.insert(self.button_apply, 0)
         self.button_apply.set_sensitive(False)
+        self.toolbar.insert(self.button_apply, 0)
         self.button_apply.show()
         self.button_apply.connect("clicked", self.save_settings)
 
@@ -305,14 +344,13 @@ class qcm_settings_editor(Gtk.Window):
         vbox2.set_border_width(20)
         vbox1.pack_start(vbox2, True, True, 0)
 
-        self.label = Gtk.Label(xalign=0)
-        self.label.set_markup('Save connections file in:')
-        vbox2.pack_start(self.label, False, False, 0)
+        self.folder_path_label = Gtk.Label(xalign=0)
+        self.folder_path_label.set_markup('Save connections file in:')
+        vbox2.pack_start(self.folder_path_label, False, False, 0)
 
         self.folder_path = Gtk.Entry()
         settings = qcm_settings()
-        path = settings.get_connections_file()
-        path = path[:-17]
+        path = os.path.dirname(settings.get_connections_file())
         self.folder_path.set_text(path)
         self.folder_path.set_editable(False)
         self.folder_path.set_sensitive(False)
@@ -322,6 +360,15 @@ class qcm_settings_editor(Gtk.Window):
         button_choose_folder.connect("clicked", self.on_folder_clicked)
         vbox2.pack_start(button_choose_folder, False, False, 0)
 
+        self.terminal_label = Gtk.Label(xalign=0)
+        self.terminal_label.set_markup("Run cmd://%s with:")
+        vbox2.pack_start(self.terminal_label, False, False, 0)
+
+        self.terminal = Gtk.Entry()
+        self.terminal.set_text(settings.get_terminal())
+        self.terminal.connect("changed", self.on_terminal_changed)
+        vbox2.pack_start(self.terminal, False, False, 0)
+
     def on_folder_clicked(self, widget):
         dialog = Gtk.FileChooserDialog("Please choose a folder", self,
             Gtk.FileChooserAction.SELECT_FOLDER,
@@ -330,18 +377,21 @@ class qcm_settings_editor(Gtk.Window):
         dialog.set_default_size(600, 400)
         settings = qcm_settings()
         path = settings.get_connections_file()
-        path = path[:-17]
+        path = os.path.dirname(path)
         dialog.set_current_folder(path)
 
         response = dialog.run()
         if response == Gtk.ResponseType.OK:
             if os.access(dialog.get_filename(), os.W_OK):
-                self.folder_path.set_text(dialog.get_filename())
                 self.button_apply.set_sensitive(True)
+                self.folder_path.set_text(dialog.get_filename())
             else:
                 self.invalid_selection_dialog()
 
         dialog.destroy()
+
+    def on_terminal_changed(self, widget):
+        self.button_apply.set_sensitive(True)
 
     def invalid_selection_dialog(self):
         messagedialog = Gtk.MessageDialog(parent=self,
@@ -376,6 +426,7 @@ class qcm_settings_editor(Gtk.Window):
         path = self.folder_path.get_text()
         settings = qcm_settings()
         settings.set_connections_file(path)
+        settings.set_terminal(self.terminal.get_text())
 
 
 class qcm_about_dialog(Gtk.Window):
