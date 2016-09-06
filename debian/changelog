@@ -1,3 +1,10 @@
+rocket-menu (20160906) xenial; urgency=low
+
+  * Add ability to run shell command from menu (thanks, Adam Wójs!)
+  * Add python-webob dependency.
+
+ -- Philip Newborough <corenominal@corenominal.org>  Tue, 6 Sep 2016 18:04:37 +0100
+
 rocket-menu (20160807) xenial; urgency=low
 
   * Improve connections editor (thanks, Mourad Hamoud!)
