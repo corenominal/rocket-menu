@@ -716,6 +716,7 @@ class qcm_connections_editor(Gtk.Window):
         if text[:3] == '---':
             self.liststore[path][1] = 'separator'
 
+        self.button_apply.set_sensitive(True)
         self.button_remove.set_sensitive(True)
         # col = self.column_address
         # self.treeview.set_cursor(path, col, True)
