@@ -54,8 +54,13 @@ class qcm_indicator():
             if connection['address'][:1] == '~':
                 connection['address'] = os.path.expanduser(connection['address'])
 
+            if connection['address'] == '':
+                menu_item = Gtk.MenuItem(connection['label'])
+                menu_item.set_sensitive(False)
+                menu.append(menu_item)
+
             # Test for horizontal rule
-            if connection['label'][:3] == '---':
+            elif connection['label'][:3] == '---':
                 menu.append(Gtk.SeparatorMenuItem())
 
             # Test for file
@@ -722,9 +727,6 @@ class qcm_connections_editor(Gtk.Window):
         # self.treeview.set_cursor(path, col, True)
 
     def address_edited(self, widget, path, text):
-        if text.strip() == '':
-            text = 'ssh://server.address'
-
         self.liststore[path][1] = text
         self.button_apply.set_sensitive(True)
 
