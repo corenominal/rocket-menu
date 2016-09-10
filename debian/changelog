@@ -1,3 +1,9 @@
+rocket-menu (20160910) xenial; urgency=low
+
+  * Allow to create disabled menu items (thanks, Adam Wójs!)
+
+ -- Philip Newborough <corenominal@corenominal.org>  Wed, 10 Sep 2016 19:46:22 +0100
+
 rocket-menu (20160907) xenial; urgency=low
 
   * Bugfix: User can't save changes without address column modification (thanks, Adam Wójs!)
